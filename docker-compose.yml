@@ -1,0 +1,18 @@
+version: "3.9"  # optional since v1.27.0
+services:
+  jupyter:
+    build:
+      dockerfile: Dockerfile_jupyter
+    ports:
+      - 8888:8888
+    volumes:
+      - ./notebooks/:/tf/notebooks
+      - ./tmp/:/tmp
+      -  ./:/code
+ #   deploy:
+   #   resources:
+    #    reservations:
+     #     devices:
+     #       - driver: nvidia
+     #         count: 2
+     #         capabilities: [ gpu ]
