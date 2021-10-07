@@ -32,9 +32,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import shutil
 import collections
 import contextlib
 import os
+import pickle
 import random
 import numpy as np
 import tensorflow as tf
@@ -63,6 +65,25 @@ class ReservoirBuffer(object):
     self._reservoir_buffer_capacity = reservoir_buffer_capacity
     self._data = []
     self._add_calls = 0
+
+  def save(self, path):
+    with open(path, "wb") as f:
+      pickle.dump({
+        'cap': self._reservoir_buffer_capacity,
+        'data': self._data,
+        'add_calls': self._add_calls
+      }, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+  @classmethod
+  def load(cls, path):
+    with open(path, 'rb') as f:
+      d = pickle.load(f)
+
+    instance = cls(d.get('cap'))
+    instance._data = d.get('data')
+    instance._add_calls = d.get('add_calls')
+
+    return instance
 
   def add(self, element):
     """Potentially adds `element` to the reservoir buffer.
@@ -276,7 +297,7 @@ class DeepCFRSolver(policy.Policy):
                reinitialize_advantage_networks: bool = True,
                save_advantage_networks: str = None,
                save_strategy_memories: str = None,
-               save_advantage_memories: str = None,
+               save_data_at_end_of_iteration_path = None,
                infer_device='cpu',
                train_device='cpu'):
     """Initialize the Deep CFR algorithm.
@@ -334,14 +355,12 @@ class DeepCFRSolver(policy.Policy):
     self._learning_rate = learning_rate
     self._save_advantage_networks = save_advantage_networks
     self._save_strategy_memories = save_strategy_memories
-    self._save_advantage_memories = save_advantage_memories
     self._infer_device = infer_device
     self._train_device = train_device
     self._strategy_memories_tfrecordpath = None
     self._strategy_memories_tfrecordfile = None
 
-    self._advantage_memories_tfrecordpath = None
-    self._advantage_memories_tfrecordfiles = []
+    self._save_data_at_end_of_iteration_path = save_data_at_end_of_iteration_path
 
     # Initialize file save locations
     if self._save_advantage_networks:
@@ -356,14 +375,10 @@ class DeepCFRSolver(policy.Policy):
             os.path.split(self._save_strategy_memories)[0], exist_ok=True)
         self._strategy_memories_tfrecordpath = self._save_strategy_memories
 
-    if self._save_advantage_memories:
-      if os.path.isdir(self._save_advantage_memories):
-        self._advantage_memories_tfrecordpath = os.path.join(
-            self._save_advantage_memories, 'advantage_memories.tfrecord')
-      else:
-        os.makedirs(
-            os.path.split(self._save_advantage_memories)[0], exist_ok=True)
-        self._strategy_advantage_tfrecordpath = self._save_advantage_memories
+    if self._save_data_at_end_of_iteration_path:
+      if not os.path.isdir(self._save_data_at_end_of_iteration_path):
+        os.makedirs(self._save_data_at_end_of_iteration_path, exist_ok=True)
+
 
     # Initialize policy network, loss, optmizer
     self._reinitialize_policy_network()
@@ -450,10 +465,13 @@ class DeepCFRSolver(policy.Policy):
         if self._save_strategy_memories:
           self._strategy_memories_tfrecordfile = stack.enter_context(
               tf.io.TFRecordWriter(self._strategy_memories_tfrecordpath))
+
+
         for _ in range(self._num_iterations):
           for p in range(self._num_players):
             for _ in range(self._num_traversals):
               self._traverse_game_tree(self._root_node, p)
+
             if self._reinitialize_advantage_networks:
               # Re-initialize advantage network for p and train from scratch.
               self._reinitialize_advantage_network(p)
@@ -463,9 +481,17 @@ class DeepCFRSolver(policy.Policy):
               self._adv_networks[p].save(
                   os.path.join(self._save_advantage_networks,
                                f'advnet_p{p}_it{self._iteration:04}'))
+
+          if self._iteration < self._num_iterations and self._save_data_at_end_of_iteration_path:
+            self.save(is_end=False)
+
           self._iteration += 1
     # Train policy network.
     policy_loss = self._learn_strategy_network()
+
+    if self._save_data_at_end_of_iteration_path:
+      self.save(is_end=True)
+
     return self._policy_network, advantage_losses, policy_loss
 
   def save_policy_network(self, outputfolder):
@@ -496,7 +522,6 @@ class DeepCFRSolver(policy.Policy):
                               strategy_action_probs, legal_actions_mask):
     # pylint: disable=g-doc-args
     """Adds the given strategy data to the memory.
-
     Uses either a tfrecordsfile on disk if provided, or a reservoir buffer.
     """
     serialized_example = self._serialize_strategy_memory(
@@ -506,19 +531,17 @@ class DeepCFRSolver(policy.Policy):
     else:
       self._strategy_memories.add(serialized_example)
 
-    def _add_to_advantage_memories(self, player, info_state_tensor, iteration,
-                                   samp_regret, legal_actions_mask):
-      # pylint: disable=g-doc-args
-      """Adds the given strategy data to the memory.
+  def _add_to_advantage_memories(self, player, info_state_tensor, iteration,
+                                 samp_regret, legal_actions_mask):
+    # pylint: disable=g-doc-args
+    """Adds the given strategy data to the memory.
 
-      Uses either a tfrecordsfile on disk if provided, or a reservoir buffer.
-      """
-      serialized_example = self._serialize_advantage_memory(
-        info_state_tensor, iteration, samp_regret, legal_actions_mask)
-      if self._save_advantage_memories:
-        self._strategy_memories_tfrecordfile.write(serialized_example)
-      else:
-        self._strategy_memories.add(serialized_example)
+    Uses either a tfrecordsfile on disk if provided, or a reservoir buffer.
+    """
+    serialized_example = self._serialize_advantage_memory(
+      info_state_tensor, iteration, samp_regret, legal_actions_mask)
+
+    self._advantage_memories[player].add(serialized_example)
 
   def _serialize_strategy_memory(self, info_state, iteration,
                                  strategy_action_probs, legal_actions_mask):
@@ -671,17 +694,6 @@ class DeepCFRSolver(policy.Policy):
     probs = probs.numpy()
     return {action: probs[0][action] for action in legal_actions}
 
-  def _get_advantage_dataset(self, player):
-    """Returns the collected regrets for the given player as a dataset."""
-    self._advantage_memories[player].shuffle_data()
-    data = tf.data.Dataset.from_tensor_slices(
-        self._advantage_memories[player].data)
-    data = data.shuffle(ADVANTAGE_TRAIN_SHUFFLE_SIZE)
-    data = data.repeat()
-    data = data.batch(self._batch_size_advantage)
-    data = data.map(self._deserialize_advantage_memory)
-    data = data.prefetch(tf.data.experimental.AUTOTUNE)
-    return data
 
   def _get_advantage_train_graph(self, player):
     """Return TF-Graph to perform advantage network train step."""
@@ -737,6 +749,19 @@ class DeepCFRSolver(policy.Policy):
     data = data.prefetch(tf.data.experimental.AUTOTUNE)
     return data
 
+  def _get_advantage_dataset(self, player):
+    """Returns the collected regrets for the given player as a dataset."""
+    self._advantage_memories[player].shuffle_data()
+    data = tf.data.Dataset.from_tensor_slices(
+        self._advantage_memories[player].data)
+    data = data.shuffle(ADVANTAGE_TRAIN_SHUFFLE_SIZE)
+    data = data.repeat()
+    data = data.batch(self._batch_size_advantage)
+    data = data.map(self._deserialize_advantage_memory)
+    data = data.prefetch(tf.data.experimental.AUTOTUNE)
+    return data
+
+
   def _learn_strategy_network(self):
     """Compute the loss over the strategy network.
 
@@ -764,3 +789,86 @@ class DeepCFRSolver(policy.Policy):
         main_loss = train_step(*d)
 
     return main_loss
+
+  def _get_data_paths(self):
+
+    return {
+      'general': os.path.join(self._save_data_at_end_of_iteration_path, 'general.pkl'),
+      'strategy_memories': os.path.join(self._save_data_at_end_of_iteration_path, 'strategy_memories'),
+      'advantage_memories': os.path.join(self._save_data_at_end_of_iteration_path, 'advantage_memories'),
+      'advantage_networks': os.path.join(self._save_data_at_end_of_iteration_path, 'advantage_networks'),
+      'strategy_policy_network': os.path.join(self._save_data_at_end_of_iteration_path, 'strategy_policy_network'),
+    }
+
+  def save(self, is_end = True):
+    """ Saves solve state so that you can pick up where you left off"""
+
+    data_paths = self._get_data_paths()
+
+    """General Data"""
+    general_data = {
+      # must save the iteration since it is used when in loss weighing,
+      # so if we load we must start at the same iteration
+      'iteration': self._iteration,
+    }
+    with open(data_paths.get('general'), "wb") as file_writer:
+      pickle.dump(general_data, file_writer, protocol=pickle.HIGHEST_PROTOCOL)
+
+    """Strategy Memories"""
+    if self._save_strategy_memories:  # means we should copy the file but only at the end
+      if is_end:  # only copy the stategy memories at the end
+        shutil.move(self._strategy_memories_tfrecordpath, f"{data_paths.get('strategy_memories')}.tfrecord")
+    else: # means we should just save it
+      self._strategy_memories.save(f"{data_paths.get('strategy_memories')}.pkl")
+
+    """Advantage Memories"""
+    for p in range(self._num_players):
+      path = os.path.join(f"{data_paths.get('advantage_memories')}_p{p}.pkl")
+      self._advantage_memories[p].save(path)
+
+    """ Advantage Networks weights """
+    # self._adv_networks[p].save(
+    #   os.path.join(self._save_advantage_networks,
+    #                f'advnet_p{p}_it{self._iteration:04}'))
+    for p in range(self._num_players):
+      path = os.path.join(f"{data_paths.get('advantage_networks')}_p{p}")
+      self._adv_networks[p].save_weights(filepath=path, overwrite=True, save_format='tf')
+
+    """ Strategy / Policy Network weights """
+    if is_end: ## policy network isn't calculated until the end
+      self._policy_network.save_weights(filepath=data_paths.get('strategy_policy_network'), overwrite=True, save_format='tf')
+
+  def load(self, load_networks=True):
+    """ Saves solve state so that you can pick up where you left off"""
+
+    data_paths = self._get_data_paths()
+
+    """General Data"""
+
+    with open(data_paths.get('general'), "rb") as f:
+      general_data = pickle.load(f)
+
+    self._iteration = general_data.get('iteration')
+
+    """Strategy Memories"""
+    path = f"{data_paths.get('strategy_memories')}.pkl"
+    if os.path.isfile(path):
+      self._strategy_memories = ReservoirBuffer.load(path)
+    else:
+      path = f"{data_paths.get('strategy_memories')}.tfrecord"
+      if os.path.isfile(path):
+        shutil.copy(path, f"{self._strategy_memories_tfrecordpath}.tfrecord")
+
+    """Advantage Memories"""
+    for p in range(self._num_players):
+      path = os.path.join(f"{data_paths.get('advantage_memories')}_p{p}.pkl")
+      self._advantage_memories[p] = ReservoirBuffer.load(path)
+
+    if load_networks:
+      """ Advantage Networks weights """
+      for p in range(self._num_players):
+        path = os.path.join(f"{data_paths.get('advantage_networks')}_p{p}")
+        self._adv_networks[p].load_weights(path)
+
+      """ Strategy / Policy Network weights """
+      self._policy_network.load_weights(data_paths.get('strategy_policy_network'))

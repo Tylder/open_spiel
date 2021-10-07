@@ -13,5 +13,8 @@ RUN pip install torch torchvision torchaudio
 
 RUN pip install open_spiel
 
+RUN apt-get update && apt-get -y install cmake
+RUN pip install omp-wrapper
+
 
 
