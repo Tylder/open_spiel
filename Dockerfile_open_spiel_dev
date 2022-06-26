@@ -1,0 +1,19 @@
+FROM lofgrendaniel87/tensorflow-gpu-jupyter-dev
+
+RUN apt-get update \
+  && apt-get install -y \
+    graphviz \
+    libgraphviz-dev
+
+RUN python --version
+
+#RUN python -m pip install \
+#    torch \
+#    && apt-get clean
+
+RUN python -m pip install git+https://github.com/Tylder/OMPEval_py_wrapper.git
+
+RUN python -m pip install open_spiel
+
+CMD ["/usr/sbin/sshd", "-D"]
+

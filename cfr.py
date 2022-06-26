@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 
 import pyspiel
-
+import time
 from open_spiel.python.algorithms import exploitability
 from open_spiel.python import policy
 
@@ -20,22 +20,23 @@ if __name__ == '__main__':
 
     solver = DeepCFRSolver(
         game,
-        policy_network_layers=(64, ),
-        advantage_network_layers=(64, ),
+        path = "/code/data/hunl_fcpa_2p/",
+        policy_network_layers=(512, 512, 256, 256, 128, 128, 64, 64, 64),
+        advantage_network_layers=(512, 512, 256, 256, 128, 128, 64, 64, 64),
         num_iterations=1,
-        num_traversals=10,
+        num_traversals=5000,
         learning_rate=1e-4,
-        batch_size_advantage=256,
-        batch_size_strategy=256,
-        memory_capacity=int(1e8),
-        policy_network_train_steps = 1,
-        advantage_network_train_steps = 1,
+        batch_size_advantage=1024*10,
+        batch_size_strategy=1024*10,
+        memory_capacity=int(1e6),
+        policy_network_train_steps = 5000,
+        advantage_network_train_steps = 1000,
         reinitialize_advantage_networks = True,
-        save_advantage_networks = "/code/data/hunl_fcpa_2p/advantage_nets",
-        save_strategy_memories = "/code/data/hunl_fcpa_2p/strategy_memories",
-        save_data_at_end_of_iteration_path = "/code/data/hunl_fcpa_2p/saved",
-        infer_device = 'cpu',
-        train_device = 'cpu'
+        save_advantage_networks = True,
+        save_strategy_memories = True,
+        save_data_at_end_of_iteration = True,
+        infer_device = 'gpu',
+        train_device = 'gpu'
     )
     #
     # solver = DeepCFRSolver(
@@ -57,18 +58,24 @@ if __name__ == '__main__':
     #     train_device = 'cpu'
     # )
 
-    solver.load(True)
+    # solver.load(True)
 
+    solver.solve()
+
+    # data = solver._get_strategy_dataset()
+    # start = time.perf_counter()
     # _, advantage_losses, policy_loss = solver.solve()
-    #
+    # end = time.perf_counter()
+
     # for player, losses in list(advantage_losses.items()):
     #     print("Advantage for player:", player,
     #           losses[:2] + ["..."] + losses[-2:])
     #     print("Advantage Buffer Size for player", player,
     #           len(solver.advantage_buffers[player]))
-    # print("Strategy Buffer Size:",
-    #       len(solver.strategy_buffer))
+    #
     # print("Final policy loss:", policy_loss)
+
+    # print(f"Took {end - start:0.4f} seconds")
     # conv = exploitability.nash_conv(
     #     game,
     #     policy.tabular_policy_from_callable(game, solver.action_probabilities))

@@ -2,17 +2,18 @@ version: "3.9"  # optional since v1.27.0
 services:
   jupyter:
     build:
-      dockerfile: Dockerfile_jupyter
+      dockerfile: Dockerfile_open_spiel_dev
     ports:
       - 8888:8888
+      - 2224:22
     volumes:
       - ./notebooks/:/tf/notebooks
       - ./tmp/:/tmp
       -  ./:/code
- #   deploy:
-   #   resources:
-    #    reservations:
-     #     devices:
-     #       - driver: nvidia
-     #         count: 2
-     #         capabilities: [ gpu ]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 2
+              capabilities: [ gpu ]
