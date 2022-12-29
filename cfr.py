@@ -5,38 +5,43 @@ import pyspiel
 import time
 from open_spiel.python.algorithms import exploitability
 from open_spiel.python import policy
+from pyspiel import Game
 
 from deep_cfr_tf2 import DeepCFRSolver
 
 if __name__ == '__main__':
-
     print(tf.config.list_physical_devices())
 
-    fcpa_game_string = pyspiel.hunl_game_string("fcpa")
+    # fcpa_game_string = pyspiel.hunl_game_string("fcpa")
     # print("Creating game: {}".format(fcpa_game_string))
-    game = pyspiel.load_game(fcpa_game_string)
+    # game: Game = pyspiel.load_game(fcpa_game_string)
+    game = pyspiel.load_game('kuhn_poker', {"players": 2})
 
-    # game = pyspiel.load_game('kuhn_poker', {"players": 2})
+    layout = game.information_state_tensor_layout()
+    shape = game.information_state_tensor_shape()
+    size = game.information_state_tensor_size()
+    num_distinct_actions = game.num_distinct_actions()
 
     solver = DeepCFRSolver(
         game,
-        path = "/code/data/hunl_fcpa_2p/",
+        # path = "/code/data/hunl_fcpa_2p/",
+        path="/code/data/kuhn_poker_2p/",
         policy_network_layers=(512, 512, 256, 256, 128, 128, 64, 64, 64),
         advantage_network_layers=(512, 512, 256, 256, 128, 128, 64, 64, 64),
         num_iterations=1,
         num_traversals=5000,
         learning_rate=1e-4,
-        batch_size_advantage=1024*10,
-        batch_size_strategy=1024*10,
+        batch_size_advantage=1024 * 10,
+        batch_size_strategy=1024 * 10,
         memory_capacity=int(1e6),
-        policy_network_train_steps = 5000,
-        advantage_network_train_steps = 1000,
-        reinitialize_advantage_networks = True,
-        save_advantage_networks = True,
-        save_strategy_memories = True,
-        save_data_at_end_of_iteration = True,
-        infer_device = 'gpu',
-        train_device = 'gpu'
+        policy_network_train_steps=5000,
+        advantage_network_train_steps=1000,
+        reinitialize_advantage_networks=True,
+        save_advantage_networks=True,
+        save_strategy_memories=True,
+        save_data_at_end_of_iteration=True,
+        infer_device='gpu',
+        train_device='gpu'
     )
     #
     # solver = DeepCFRSolver(
@@ -59,24 +64,23 @@ if __name__ == '__main__':
     # )
 
     # solver.load(True)
+    # solver.solve()
 
-    solver.solve()
+    data = solver._get_strategy_dataset()
+    start = time.perf_counter()
+    _, advantage_losses, policy_loss = solver.solve()
+    end = time.perf_counter()
 
-    # data = solver._get_strategy_dataset()
-    # start = time.perf_counter()
-    # _, advantage_losses, policy_loss = solver.solve()
-    # end = time.perf_counter()
+    for player, losses in list(advantage_losses.items()):
+        print("Advantage for player:", player,
+              losses[:2] + ["..."] + losses[-2:])
+        print("Advantage Buffer Size for player", player,
+              len(solver.advantage_buffers[player]))
 
-    # for player, losses in list(advantage_losses.items()):
-    #     print("Advantage for player:", player,
-    #           losses[:2] + ["..."] + losses[-2:])
-    #     print("Advantage Buffer Size for player", player,
-    #           len(solver.advantage_buffers[player]))
-    #
-    # print("Final policy loss:", policy_loss)
+    print("Final policy loss:", policy_loss)
 
-    # print(f"Took {end - start:0.4f} seconds")
-    # conv = exploitability.nash_conv(
-    #     game,
-    #     policy.tabular_policy_from_callable(game, solver.action_probabilities))
-    # print("Deep CFR - NashConv:", conv)
+    print(f"Took {end - start:0.4f} seconds")
+    conv = exploitability.nash_conv(
+        game,
+        policy.tabular_policy_from_callable(game, solver.action_probabilities))
+    print("Deep CFR - NashConv:", conv)

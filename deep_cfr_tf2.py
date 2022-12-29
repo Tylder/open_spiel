@@ -932,7 +932,7 @@ class DeepCFRSolver(policy.Policy):
             pickle.dump(general_data, file_writer, protocol=pickle.HIGHEST_PROTOCOL)
 
         """Strategy Memories"""
-        if is_end:  # only copy the stategy memories at the end
+        if is_end:  # only copy the strategy memories at the end
             self._strategy_memories.save(f"{data_paths.get('strategy_memories')}")
 
         """Advantage Memories"""
