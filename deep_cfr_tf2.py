@@ -229,9 +229,9 @@ class SkipDense(tf.keras.layers.Layer):
 
 
 class PolicyNetwork(tf.keras.Model):
-    """Implements the policy network as an MLP.
+    """Implements the policy network as an MLP. (Multilayer perceptron)
 
-  Implements the policy network as a MLP with skip connections in adjacent
+  Implements the policy network as an MLP with skip connections in adjacent
   layers with the same number of units, except for the last hidden connection
   where a layer normalization is applied.
   """
@@ -458,10 +458,10 @@ class DeepCFRSolver(policy.Policy):
         if self._save_advantage_networks:
             os.makedirs(os.path.join(self._path, data_paths.get('advantage_memories')), exist_ok=True)
 
-        # Initialize policy network, loss, optmizer
+        # Initialize policy network, loss, optimizer
         self._reinitialize_policy_network()
 
-        # Initialize advantage networks, losses, optmizers
+        # Initialize advantage networks, losses, optimizers
         self._adv_networks = []
         self._adv_networks_train = []
         self._loss_advantages = []
@@ -518,9 +518,9 @@ class DeepCFRSolver(policy.Policy):
 
     def _create_memories(self, memory_capacity, path: str = None):
         """
-    Create memory buffers and associated feature descriptions.
-      if path given will path and load memories from it
-    """
+        Create memory buffers and associated feature descriptions.
+          if path given will path and load memories from it
+        """
 
         if self._strategy_memory_type == 'TF_Record':
             self._strategy_memories = TFRecordBuffer(path=self._get_data_paths(self._path).get('strategy_memories'),
@@ -704,18 +704,19 @@ class DeepCFRSolver(policy.Policy):
                 tups['legal_actions'])
 
     def _traverse_game_tree(self, state, player):
-        """Performs a traversal of the game tree using external sampling.
+        """
+        Performs a traversal of the game tree using external sampling.
 
-    Over a traversal the advantage and strategy memories are populated with
-    computed advantage values and matched regrets respectively.
+        Over a traversal the advantage and strategy memories are populated with
+        computed advantage values and matched regrets respectively.
 
-    Args:
-      state: Current OpenSpiel game state.
-      player: (int) Player index for this traversal.
+        Args:
+          state: Current OpenSpiel game state.
+          player: (int) Player index for this traversal.
 
-    Returns:
-      Recursively returns expected payoffs for each action.
-    """
+        Returns:
+          Recursively returns expected payoffs for each action.
+        """
         if state.is_terminal():
             # Terminal state get returns.
             return state.returns()[player]
@@ -727,7 +728,7 @@ class DeepCFRSolver(policy.Policy):
             # Update the policy over the info set & actions via regret matching.
             _, strategy = self._sample_action_from_advantage(state, player)
             exp_payoff = 0 * strategy
-            for action in state.legal_actions():
+            for action in state.legal_actions():  # take each legal action
                 exp_payoff[action] = self._traverse_game_tree(
                     state.child(action), player)
             ev = np.sum(exp_payoff * strategy)
@@ -761,7 +762,7 @@ class DeepCFRSolver(policy.Policy):
             matched_regrets = advantages / summed_regret
         else:
             """ set matched_regrets to one hot
-            - if legal action set advs, else eps..
+            - if legal action set advantages, else eps..
             - get highest value index
             - set that index to 1 and all other to 0 by one_hot.
             """
@@ -771,16 +772,17 @@ class DeepCFRSolver(policy.Policy):
         return advantages, matched_regrets
 
     def _sample_action_from_advantage(self, state, player):
-        """Returns an info state policy by applying regret-matching.
+        """
+        Returns an info state policy by applying regret-matching.
 
-    Args:
-      state: Current OpenSpiel game state.
-      player: (int) Player index over which to compute regrets.
+        Args:
+          state: Current game state.
+          player: (int) Player index over which to compute regrets.
 
-    Returns:
-      1. (np-array) Advantage values for info state actions indexed by action.
-      2. (np-array) Matched regrets, prob for actions indexed by action.
-    """
+        Returns:
+          1. (np-array) Advantage values for info state actions indexed by action.
+          2. (np-array) Matched regrets, prob for actions indexed by action. same as 'strategy'
+        """
         info_state = tf.constant(
             state.information_state_tensor(player), dtype=tf.float32)
         legal_actions_mask = tf.constant(
@@ -825,15 +827,15 @@ class DeepCFRSolver(policy.Policy):
     def _learn_advantage_network(self, player):
         """Compute the loss on sampled transitions and perform a Q-network update.
 
-    If there are not enough elements in the buffer, no loss is computed and
-    `None` is returned instead.
+        If there are not enough elements in the buffer, no loss is computed and
+        `None` is returned instead.
 
-    Args:
-      player: (int) player index.
+        Args:
+          player: (int) player index.
 
-    Returns:
-      The average loss over the advantage network of the last batch.
-    """
+        Returns:
+          The average loss over the advantage network of the last batch.
+        """
 
         with tf.device(self._train_device):
             tfit = tf.constant(self._iteration, dtype=tf.float32)
